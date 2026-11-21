@@ -3,7 +3,13 @@ const admin = require('firebase-admin');
 const axios = require('axios');
 
 const STEAM_API_KEY = process.env.STEAM_API_KEY;
-const SITE_URL = process.env.SITE_URL; // адрес вашего сайта, без / на конце
+const SITE_URL = process.env.SITE_URL; // адрес сайта (ash-clans.web.app), без слэша на конце
+// RENDER_EXTERNAL_URL Render подставляет сам — вручную добавлять не нужно.
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
+
+if (!STEAM_API_KEY || !SITE_URL || !RENDER_URL) {
+  console.error('Нет переменных окружения: STEAM_API_KEY, SITE_URL, RENDER_EXTERNAL_URL');
+}
 
 const serviceAccount = JSON.parse(process.env.SERVICE_ACCOUNT_JSON);
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
@@ -16,8 +22,8 @@ app.get('/steamAuth', (req, res) => {
   const params = new URLSearchParams({
     'openid.ns': 'http://specs.openid.net/auth/2.0',
     'openid.mode': 'checkid_setup',
-    'openid.return_to': process.env.RENDER_EXTERNAL_URL + '/steamCallback',
-    'openid.realm': process.env.RENDER_EXTERNAL_URL,
+    'openid.return_to': RENDER_URL + '/steamCallback',
+    'openid.realm': RENDER_URL,
     'openid.identity': 'http://specs.openid.net/auth/2.0/identifier_select',
     'openid.claimed_id': 'http://specs.openid.net/auth/2.0/identifier_select',
   });
