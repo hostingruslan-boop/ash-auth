@@ -17,7 +17,7 @@ app.get('/steamAuth', (req, res) => {
     'openid.ns': 'http://specs.openid.net/auth/2.0',
     'openid.mode': 'checkid_setup',
     'openid.return_to': process.env.RENDER_EXTERNAL_URL + '/steamCallback',
-    'openid.realm': SITE_URL,
+    ''openid.realm': process.env.RENDER_EXTERNAL_URL,': SITE_URL,
     'openid.identity': 'http://specs.openid.net/auth/2.0/identifier_select',
     'openid.claimed_id': 'http://specs.openid.net/auth/2.0/identifier_select',
   });
