@@ -17,6 +17,9 @@ const db = admin.firestore();
 
 const app = express();
 
+// Пульс: cron-job.org ходит сюда каждые 10 минут, чтобы бесплатный Render не засыпал
+app.get('/', (req, res) => res.send('Ash auth server alive'));
+
 // Открывает игроку страницу входа Steam
 app.get('/steamAuth', (req, res) => {
   const params = new URLSearchParams({
@@ -66,5 +69,61 @@ app.get('/steamCallback', async (req, res) => {
     return res.redirect(SITE_URL + '/#error=server');
   }
 });
+
+// ---------- Push-уведомления о новых сообщениях ----------
+const messaging = admin.messaging();
+const pushState = db.doc('pushState/main');
+
+let lastPushMs = 0;
+let seen = new Set();
+
+(async () => {
+  try {
+    const snap = await pushState.get();
+    lastPushMs = (snap.exists() && snap.data().lastPushMs) || 0;
+  } catch (e) {
+    console.error('pushState read:', e.message);
+  }
+
+  db.collectionGroup('messages').orderBy('createdAt', 'desc').limit(30).onSnapshot(async (snap) => {
+    for (const ch of snap.docChanges()) {
+      if (ch.type !== 'added') continue;
+      const id = ch.doc.id;
+      const m = ch.doc.data();
+      const created = m.createdAt && m.createdAt.toDate ? m.createdAt.toDate().getTime() : 0;
+      if (!created || created <= lastPushMs || seen.has(id)) continue;
+      seen.add(id);
+      if (seen.size > 800) seen = new Set(Array.from(seen).slice(-300));
+      lastPushMs = created;
+      pushState.set({ lastPushMs }).catch(() => {});
+      try {
+        const clanRef = ch.doc.ref.parent.parent;
+        if (!clanRef) continue;
+        const clanDoc = await clanRef.get();
+        const tag = (clanDoc.data() || {}).tag || '';
+        const members = await clanRef.collection('members').get();
+        const tokens = [];
+        for (const mm of members.docs) {
+          if (mm.id === m.senderId) continue; // автору своё сообщение не прилетает
+          const u = await db.doc('users/' + mm.id).get();
+          const t = u.exists && u.data().fcmTokens ? Object.keys(u.data().fcmTokens) : [];
+          tokens.push(...t);
+        }
+        if (!tokens.length) continue;
+        await messaging.sendEachForMulticast({
+          tokens,
+          notification: {
+            title: (tag ? '[' + tag + '] ' : '') + (m.senderName || 'Клан'),
+            body: String(m.text || '').slice(0, 200),
+          },
+          webpush: { fcmOptions: { link: SITE_URL } },
+        });
+        console.log('push sent to', tokens.length, 'device(s)');
+      } catch (e) {
+        console.error('push error:', e.message);
+      }
+    }
+  });
+})();
 
 app.listen(process.env.PORT || 3000);
