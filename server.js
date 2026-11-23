@@ -114,7 +114,7 @@ let seen = new Set();
           tokens,
           notification: {
             title: (tag ? '[' + tag + '] ' : '') + (m.senderName || 'Клан'),
-            body: String(m.text || '').slice(0, 200),
+            body: m.type === 'voice' ? '🔊 Голосовое сообщение' : (m.text || '').slice(0, 200),
           },
           webpush: { fcmOptions: { link: SITE_URL } },
         });
