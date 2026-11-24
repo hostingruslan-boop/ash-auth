@@ -23,7 +23,7 @@ app.use((req, res, next) => {
   const origin = req.headers.origin || '';
   if (['https://ash-clans.web.app', 'https://ash-clans.firebaseapp.com'].includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   }
   if (req.method === 'OPTIONS') return res.sendStatus(204);
@@ -44,6 +44,37 @@ app.get('/steamAuth', (req, res) => {
     'openid.claimed_id': 'http://specs.openid.net/auth/2.0/identifier_select',
   });
   res.redirect('https://steamcommunity.com/openid/login?' + params.toString());
+});
+
+// Сервер клана в Rust: поиск по названию или статус по адресу (client.connect ip:порт)
+app.get('/serverinfo', async (req, res) => {
+  try {
+    const addr = (req.query.addr || '').toString().trim();
+    const name = (req.query.name || '').toString().trim();
+    let filter = null;
+    if (addr) {
+      if (!/^[\w.\-]+:\d{1,5}$/.test(addr)) return res.status(400).json({ ok: false, error: 'bad_addr' });
+      filter = '\\addr\\' + addr;
+    } else if (name) {
+      if (name.length < 3 || name.length > 80) return res.status(400).json({ ok: false, error: 'bad_name' });
+      filter = '\\name\\' + name + '\\appid\\252490';
+    } else {
+      return res.status(400).json({ ok: false, error: 'need_query' });
+    }
+    const r = await axios.get('https://api.steampowered.com/IGameServersService/GetServerList/v1/', {
+      params: { key: STEAM_API_KEY, filter: filter, limit: addr ? 5 : 10 },
+    });
+    const list = (r.data && r.data.response && r.data.response.servers) || [];
+    const servers = list.map((s) => ({
+      name: s.name || '', addr: s.addr || '', map: s.map || '',
+      players: s.players || 0, max: s.max_players || 0,
+    }));
+    res.json({ ok: true, servers: servers });
+  } catch (e) {
+    const code = (e.response && e.response.status) || 0;
+    if (code === 403) return res.status(403).json({ ok: false, error: 'steam_key_invalid' });
+    res.status(502).json({ ok: false, error: 'steam_down' });
+  }
 });
 
 // Steam вернул игрока — проверяем подлинность и выдаём токен
