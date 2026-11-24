@@ -158,7 +158,7 @@ let seen = new Set();
           tokens,
           notification: {
             title: (tag ? '[' + tag + '] ' : '') + (m.senderName || 'Клан'),
-            body: m.type === 'voice' ? '🔊 Голосовое сообщение' : (m.text || '').slice(0, 200),
+            body: m.type === 'voice' ? '🔊 Голосовое сообщение' : (/^https:\/\/\S+\.gif(v)?(\?.*)?$/i.test(m.text || '') ? '🎬 GIF' : (m.text || '').slice(0, 200)),
           },
           webpush: { fcmOptions: { link: SITE_URL } },
         });
@@ -169,6 +169,35 @@ let seen = new Set();
     }
   });
 })();
+
+// Поиск GIF-анимаций (Tenor). Бесплатный ключ кладётся на Render в переменную TENOR_KEY.
+app.get('/gifsearch', async (req, res) => {
+  try {
+    const key = process.env.TENOR_KEY;
+    if (!key) return res.status(400).json({ ok: false, error: 'no_key' });
+    const q = (req.query.q || '').toString().trim().slice(0, 80);
+    if (q.length < 2) return res.status(400).json({ ok: false, error: 'bad_query' });
+    const r = await axios.get('https://tenor.googleapis.com/v2/search', {
+      params: { key: key, q: q, limit: 12, media_filter: 'gif,tinygif', contentfilter: 'medium' },
+    });
+    const items = (r.data && r.data.results) || [];
+    const gifs = [];
+    for (const g of items) {
+      const mf = (g.media_formats || {});
+      const media = mf.tinygif || mf.gif || {};
+      if (!media.url) continue;
+      gifs.push({
+        url: media.url,
+        thumb: media.url,
+        w: (media.dims && media.dims[0]) || 200,
+        h: (media.dims && media.dims[1]) || 200,
+      });
+    }
+    res.json({ ok: true, gifs: gifs });
+  } catch (e) {
+    res.status(502).json({ ok: false, error: 'tenor_down' });
+  }
+});
 
 // ---------- Операции через админ-ключ (мимо правил базы) ----------
 
