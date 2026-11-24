@@ -16,6 +16,7 @@ admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 
 const app = express();
+app.use(express.json());
 
 // Пульс: cron-job.org ходит сюда каждые 10 минут, чтобы бесплатный Render не засыпал
 app.get('/', (req, res) => res.send('Ash auth server alive'));
@@ -125,5 +126,71 @@ let seen = new Set();
     }
   });
 })();
+
+// ---------- Операции через админ-ключ (мимо правил базы) ----------
+
+const SANE_UID = /^steam_\d{17}$/;
+
+// Регистрация токена уведомлений
+app.post('/fcm', async (req, res) => {
+  try {
+    const me = await admin.auth().verifyIdToken(String(req.body.idToken || ''));
+    const uid = me.uid;
+    if (!SANE_UID.test(uid)) throw new Error('bad uid');
+    const fcm = String(req.body.fcm || '');
+    if (!fcm || fcm.length > 250) throw new Error('bad fcm token');
+    await db.doc('users/' + uid).set(
+      { fcmTokens: { [fcm]: Date.now() } },
+      { merge: true }
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('fcm error:', e.message);
+    res.status(400).json({ error: 'не удалось сохранить токен' });
+  }
+});
+
+// Исключение участника клана
+app.post('/kick', async (req, res) => {
+  try {
+    const me = await admin.auth().verifyIdToken(String(req.body.idToken || ''));
+    const uid = me.uid;
+    const targetUid = String(req.body.targetUid || '');
+    if (!SANE_UID.test(targetUid)) throw new Error('bad target');
+    if (targetUid === uid) throw new Error('себя не исключить');
+
+    const meDoc = (await db.doc('users/' + uid).get()).data() || {};
+    const clanId = meDoc.clanId;
+    if (!clanId) throw new Error('вы не в клане');
+    const clanRef = db.doc('clans/' + clanId);
+    const clanDoc = (await clanRef.get()).data() || {};
+    const meMember = (await clanRef.collection('members').doc(uid).get()).data() || {};
+    const isOwner = clanDoc.ownerId === uid || meMember.role === 'owner';
+    const allowed = isOwner || (meMember.permissions || []).includes('kick_members');
+    if (!allowed) throw new Error('нет права на исключение');
+
+    const targetDoc = await clanRef.collection('members').doc(targetUid).get();
+    if (!targetDoc.exists) throw new Error('участник не найден');
+    const tData = targetDoc.data() || {};
+    if ((tData.role || '') === 'owner') throw new Error('главу исключить нельзя');
+
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(clanRef);
+      const count = Math.max(((snap.data() || {}).membersCount || 1) - 1, 0);
+      tx.delete(clanRef.collection('members').doc(targetUid));
+      tx.update(clanRef, { membersCount: count });
+      tx.update(db.doc('users/' + targetUid), { clanId: null, role: null, permissions: [] });
+      tx.set(clanRef.collection('logs').doc(), {
+        text: (tData.nickname || targetUid) + ' исключён из клана',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+    console.log('kick ok:', targetUid, 'из', clanId, 'кем', uid);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('kick error:', e.message);
+    res.status(400).json({ error: e.message || 'не удалось исключить' });
+  }
+});
 
 app.listen(process.env.PORT || 3000);
