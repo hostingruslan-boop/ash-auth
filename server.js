@@ -18,6 +18,18 @@ const db = admin.firestore();
 const app = express();
 app.use(express.json());
 
+// Пускаем запросы только с нашего сайта (иначе браузер блокирует их как чужие)
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '';
+  if (['https://ash-clans.web.app', 'https://ash-clans.firebaseapp.com'].includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 // Пульс: cron-job.org ходит сюда каждые 10 минут, чтобы бесплатный Render не засыпал
 app.get('/', (req, res) => res.send('Ash auth server alive'));
 
